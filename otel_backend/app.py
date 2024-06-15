@@ -1,3 +1,4 @@
+import pandas as pd
 import torch
 from fastapi import BackgroundTasks, FastAPI, Request
 
@@ -21,6 +22,21 @@ model = GAT(
     patience=3,
 )
 
+GLOBAL_ANOMALY_ROWS = pd.DataFrame()
+
+
+async def store_anomalies(data, traces_df):
+    global GLOBAL_ANOMALY_ROWS
+    predictions = model.test_model(data)
+    predicted_indices = predictions == 1
+    anomaly_rows = traces_df[predicted_indices.numpy()]
+    unique_anomaly_rows = anomaly_rows.drop_duplicates(
+        subset=["source_namespace_label", "source_pod_label"]
+    )[["source_namespace_label", "source_pod_label", "timestamp"]]
+    GLOBAL_ANOMALY_ROWS = pd.concat(
+        [GLOBAL_ANOMALY_ROWS, unique_anomaly_rows]
+    ).drop_duplicates(subset=["source_namespace_label", "source_pod_label"])
+
 
 async def process_traces(raw_data: bytes):
     traces = None
@@ -31,6 +47,7 @@ async def process_traces(raw_data: bytes):
         traces_df = await get_as_dataframe(extracted_traces)
         data = split_data(traces_df)
         model.train_model(data)
+        await store_anomalies(data, traces_df)
     except Exception as e:
         logger.error(f"Error processing traces: {e}")
 
@@ -42,6 +59,15 @@ async def receive_traces(
     raw_data = await request.body()
     background_tasks.add_task(process_traces, raw_data)
     return TraceResponse(status="received")
+
+
+@app.get("/anomalies")
+async def get_anomalies():
+    global GLOBAL_ANOMALY_ROWS
+    if not GLOBAL_ANOMALY_ROWS.empty:
+        return GLOBAL_ANOMALY_ROWS.to_dict(orient="records")
+    else:
+        return {"message": "No anomalies detected yet."}
 
 
 if __name__ == "__main__":
