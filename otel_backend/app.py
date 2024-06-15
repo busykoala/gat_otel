@@ -57,6 +57,14 @@ async def process_traces(raw_data: bytes):
             logger.error(f"Error processing traces: {e}")
 
 
+async def get_recent_anomalies(anomalies):
+    cutoff_time = datetime.utcnow() - timedelta(minutes=5)
+    cutoff_time = cutoff_time.replace(tzinfo=pd.Timestamp.utcnow().tzinfo)
+    anomalies["timestamp"] = pd.to_datetime(anomalies["timestamp"], utc=True)
+    recent_anomalies = anomalies[anomalies["timestamp"] >= cutoff_time]
+    return recent_anomalies.to_dict(orient="records")
+
+
 @app.post("/v1/traces", response_model=TraceResponse)
 async def receive_traces(
     request: Request, background_tasks: BackgroundTasks
@@ -69,17 +77,8 @@ async def receive_traces(
 @app.get("/anomalies")
 async def get_anomalies():
     global GLOBAL_ANOMALY_ROWS
-
     if not GLOBAL_ANOMALY_ROWS.empty:
-        cutoff_time = datetime.utcnow() - timedelta(minutes=5)
-        GLOBAL_ANOMALY_ROWS["timestamp"] = pd.to_datetime(
-            GLOBAL_ANOMALY_ROWS["timestamp"]
-        )
-        recent_anomalies = GLOBAL_ANOMALY_ROWS[
-            GLOBAL_ANOMALY_ROWS["timestamp"] >= cutoff_time
-        ]
-        recent_anomalies_list = recent_anomalies.to_dict(orient="records")
-        return recent_anomalies_list
+        return await get_recent_anomalies(GLOBAL_ANOMALY_ROWS)
     else:
         return []
 
