@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 
 import pandas as pd
 import torch
@@ -68,10 +69,19 @@ async def receive_traces(
 @app.get("/anomalies")
 async def get_anomalies():
     global GLOBAL_ANOMALY_ROWS
+
     if not GLOBAL_ANOMALY_ROWS.empty:
-        return GLOBAL_ANOMALY_ROWS.to_dict(orient="records")
+        cutoff_time = datetime.utcnow() - timedelta(minutes=5)
+        GLOBAL_ANOMALY_ROWS["timestamp"] = pd.to_datetime(
+            GLOBAL_ANOMALY_ROWS["timestamp"]
+        )
+        recent_anomalies = GLOBAL_ANOMALY_ROWS[
+            GLOBAL_ANOMALY_ROWS["timestamp"] >= cutoff_time
+        ]
+        recent_anomalies_list = recent_anomalies.to_dict(orient="records")
+        return recent_anomalies_list
     else:
-        return {"message": "No anomalies detected yet."}
+        return []
 
 
 if __name__ == "__main__":
