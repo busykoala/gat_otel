@@ -1,3 +1,5 @@
+import asyncio
+
 import pandas as pd
 import torch
 from fastapi import BackgroundTasks, FastAPI, Request
@@ -23,6 +25,7 @@ model = GAT(
 )
 
 GLOBAL_ANOMALY_ROWS = pd.DataFrame()
+training_lock = asyncio.Lock()
 
 
 async def store_anomalies(data, traces_df):
@@ -39,17 +42,18 @@ async def store_anomalies(data, traces_df):
 
 
 async def process_traces(raw_data: bytes):
-    traces = None
-    extracted_traces = []
-    try:
-        traces = await deserialize_traces(raw_data)
-        extracted_traces = await extract_data(traces)
-        traces_df = await get_as_dataframe(extracted_traces)
-        data = split_data(traces_df)
-        model.train_model(data)
-        await store_anomalies(data, traces_df)
-    except Exception as e:
-        logger.error(f"Error processing traces: {e}")
+    async with training_lock:
+        traces = None
+        extracted_traces = []
+        try:
+            traces = await deserialize_traces(raw_data)
+            extracted_traces = await extract_data(traces)
+            traces_df = await get_as_dataframe(extracted_traces)
+            data = split_data(traces_df)
+            model.train_model(data)
+            await store_anomalies(data, traces_df)
+        except Exception as e:
+            logger.error(f"Error processing traces: {e}")
 
 
 @app.post("/v1/traces", response_model=TraceResponse)
